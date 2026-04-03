@@ -1,28 +1,25 @@
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { genkit, z } from "genkit";
 import { googleAI } from "@genkit-ai/google-genai";
 
-// Load variables from .env file
 dotenv.config();
 
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
+// ─────────────────────────────────────────────
+// Configuration - Using your provided keys
+// ─────────────────────────────────────────────
+const GOOGLE_API_KEY = "AIzaSyC1k58boI1RJ4XsUMaBI6cXErj2_3QPZPY";
+const WEATHER_API_KEY = "fa5212911d9843c099a80832260204";
 const PORT = process.env.PORT || 3000;
-
-// Validate keys are present
-if (!GOOGLE_API_KEY || !WEATHER_API_KEY) {
-  console.error("❌ Missing API Keys in .env file");
-  process.exit(1);
-}
 
 // ─────────────────────────────────────────────
 // Initialize Genkit
+// Use 'gemini-2.5-flash' for the best speed/stability in 2026
 // ─────────────────────────────────────────────
 const ai = genkit({
   plugins: [googleAI({ apiKey: GOOGLE_API_KEY })],
-  model: "googleai/gemini-1.5-flash",
+  model: "googleai/gemini-2.5-flash",
 });
 
 // ─────────────────────────────────────────────
@@ -30,11 +27,25 @@ const ai = genkit({
 // ─────────────────────────────────────────────
 const WeatherSchema = z.object({
   location: z.string(),
+  country: z.string(),
+  region: z.string(),
+  localtime: z.string(),
   temp_c: z.number(),
+  temp_f: z.number(),
   condition: z.string(),
+  condition_code: z.number(),
+  icon: z.string(),
   humidity: z.number(),
   wind_kph: z.number(),
-  icon: z.string(),
+  wind_dir: z.string(),
+  feelslike_c: z.number(),
+  feelslike_f: z.number(),
+  uv: z.number(),
+  visibility_km: z.number(),
+  pressure_mb: z.number(),
+  precip_mm: z.number(),
+  cloud: z.number(),
+  is_day: z.number(),
 });
 
 const FlowOutputSchema = z.object({
@@ -44,12 +55,12 @@ const FlowOutputSchema = z.object({
 });
 
 // ─────────────────────────────────────────────
-// Tool: Fetch Weather Data
+// Tool: Fetch Weather from WeatherAPI.com
 // ─────────────────────────────────────────────
 const getWeatherTool = ai.defineTool(
   {
     name: "getWeather",
-    description: "Fetches real-time weather data",
+    description: "Fetches real-time weather data for a location.",
     inputSchema: z.object({ location: z.string() }),
     outputSchema: WeatherSchema,
   },
@@ -64,17 +75,31 @@ const getWeatherTool = ai.defineTool(
     const d: any = await res.json();
     return {
       location: d.location.name,
+      country: d.location.country,
+      region: d.location.region,
+      localtime: d.location.localtime,
       temp_c: d.current.temp_c,
+      temp_f: d.current.temp_f,
       condition: d.current.condition.text,
+      condition_code: d.current.condition.code,
+      icon: "https:" + d.current.condition.icon,
       humidity: d.current.humidity,
       wind_kph: d.current.wind_kph,
-      icon: "https:" + d.current.condition.icon,
+      wind_dir: d.current.wind_dir,
+      feelslike_c: d.current.feelslike_c,
+      feelslike_f: d.current.feelslike_f,
+      uv: d.current.uv,
+      visibility_km: d.current.vis_km,
+      pressure_mb: d.current.pressure_mb,
+      precip_mm: d.current.precip_mm,
+      cloud: d.current.cloud,
+      is_day: d.current.is_day,
     };
   }
 );
 
 // ─────────────────────────────────────────────
-// Flow: AI Weather Analysis
+// Genkit Flow: AI-powered weather analysis
 // ─────────────────────────────────────────────
 const weatherFlow = ai.defineFlow(
   {
@@ -86,8 +111,7 @@ const weatherFlow = ai.defineFlow(
     const weather = await getWeatherTool({ location });
 
     const prompt = `
-      You are a helpful weather assistant.
-      Analyze: ${weather.location}, ${weather.temp_c}°C, ${weather.condition}.
+      Analyze this weather for ${weather.location}: ${weather.temp_c}°C, ${weather.condition}.
       Respond ONLY with valid JSON:
       {
         "summary": "A friendly 2-sentence summary of the weather.",
@@ -103,47 +127,35 @@ const weatherFlow = ai.defineFlow(
       parsed = JSON.parse(clean);
     } catch {
       parsed = {
-        summary: `It's currently ${weather.condition} in ${weather.location}.`,
-        tips: ["Dress appropriately.", "Check for local updates.", "Have a great day!"],
+        summary: `It is currently ${weather.condition} in ${weather.location}.`,
+        tips: ["Check the local forecast.", "Dress for the weather.", "Have a nice day!"],
       };
     }
 
-    return { weather, ...parsed };
+    return { weather, summary: parsed.summary, tips: parsed.tips };
   }
 );
 
 // ─────────────────────────────────────────────
-// Express Server Setup
+// Express App
 // ─────────────────────────────────────────────
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check endpoint for monitoring
-app.get("/health", (req, res) => {
-  res.json({ status: "online", timestamp: new Date().toISOString() });
-});
-
-// Main weather endpoint
 app.post("/weather", async (req: Request, res: Response) => {
   const { location } = req.body;
-
-  if (!location) {
-    return res.status(400).json({ error: "Location is required" });
-  }
+  if (!location) return res.status(400).json({ error: "Location is required" });
 
   try {
     const result = await weatherFlow({ location });
     res.json(result);
   } catch (err: any) {
-    console.error(`[Error]: ${err.message}`);
-    res.status(500).json({ error: "Failed to process weather request" });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Listen on 0.0.0.0 to allow external connections
-app.listen(Number(PORT), "0.0.0.0", () => {
-  console.log(`\n🌤  Weather Backend Live`);
-  console.log(`   Local:   http://localhost:${PORT}`);
-  console.log(`   Network: http://10.220.207.63:${PORT}`);
+app.listen(PORT, () => {
+  console.log(`🌤  AI Weather Backend running on http://localhost:${PORT}`);
 });
