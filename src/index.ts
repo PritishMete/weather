@@ -9,8 +9,7 @@ dotenv.config();
 // ─────────────────────────────────────────────
 // Configuration - Using your provided keys
 // ─────────────────────────────────────────────
-const GOOGLE_API_KEY = "AIzaSyDq-2rqb9AONsdVZ9CWaqctc59Z-XkC3GY";
-const WEATHER_API_KEY = "fa5212911d9843c099a80832260204";
+const GOOGLE_API_KEY = process.env.GEMINI_API_KEY; // This is Node.js syntaxconst WEATHER_API_KEY = "fa5212911d9843c099a80832260204";
 const PORT = process.env.PORT || 3000;
 
 // ─────────────────────────────────────────────
